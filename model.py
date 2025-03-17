@@ -20,22 +20,27 @@ training_price_data_path = os.path.join(data_base_path, "price_data.csv")
 scaler_file_path = os.path.join(data_base_path, "scaler.pkl")
 
 def download_data_binance(token, training_days, region):
+    print(f"Calling download_binance_daily_data for {token}USDT, days={training_days}, region={region}")
     files = download_binance_daily_data(f"{token}USDT", training_days, region, binance_data_path)
-    print(f"Downloaded {len(files)} new files for {token}USDT")
+    print(f"Downloaded {len(files)} new files for {token}USDT from Binance. Files: {files[:5]}")
     return files
 
 def download_data_coingecko(token, training_days):
+    print(f"Calling download_coingecko_data for {token}, days={training_days}, API_KEY={CG_API_KEY}")
     files = download_coingecko_data(token, training_days, coingecko_data_path, CG_API_KEY)
-    print(f"Downloaded {len(files)} new files")
+    print(f"Downloaded {len(files)} new files for {token} from CoinGecko. Files: {files[:5]}")
     return files
 
 def download_data(token, training_days, region, data_provider):
+    print(f"Attempting to download data for {token} with training_days={training_days}, region={region}, provider={data_provider}")
     if data_provider == "coingecko":
-        return download_data_coingecko(token, int(training_days))
+        result = download_data_coingecko(token, int(training_days))
     elif data_provider == "binance":
-        return download_data_binance(token, training_days, region)
+        result = download_data_binance(token, training_days, region)
     else:
-        raise ValueError("Unsupported data provider")
+        raise ValueError(f"Unsupported data provider: {data_provider}")
+    print(f"Download result for {token}: {len(result)} files")
+    return result
 
 def format_data(files_btc, files_eth, data_provider):
     print(f"Raw files for BTCUSDT: {files_btc[:5]}")
@@ -138,7 +143,7 @@ def format_data(files_btc, files_eth, data_provider):
     price_df["target_ETHUSDT"] = price_df["close_ETHUSDT"].shift(-360)  # 6 hours ahead
 
     price_df = price_df.dropna()
-    print(f"Total rows in price_df after preprocessing: {len(price_df)}")
+    print(f" sospecha Total rows in price_df after preprocessing: {len(price_df)}")
     print(f"First few dates in price_df: {price_df.index[:5].tolist()}")
 
     price_df.to_csv(training_price_data_path, date_format='%Y-%m-%d %H:%M:%S')
