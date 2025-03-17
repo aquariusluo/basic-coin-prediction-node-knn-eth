@@ -124,26 +124,16 @@ def format_data(files_btc, files_eth, data_provider):
     price_df_eth = price_df_eth.rename(columns=lambda x: f"{x}_ETHUSDT")
     price_df = pd.concat([price_df_btc, price_df_eth], axis=1)
 
-    # Feature engineering for price prediction (replacing volatility prediction)
+    # Feature engineering for price prediction
+    feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
-        # Original volatility features (commented out)
-        # price_df[f"log_return_{pair}"] = np.log(price_df[f"close_{pair}"].shift(-1) / price_df[f"close_{pair}"])
-        # price_df[f"volatility_6h_{pair}"] = price_df[f"log_return_{pair}"].rolling(window=360).std() * np.sqrt(360)
-        # for metric in ["close", "volume", "log_return"]:
-        #     for lag in range(1, 11):
-        #         price_df[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
-        # price_df[f"volatility_6h_{pair}_lag1"] = price_df[f"volatility_6h_{pair}"].shift(1)
+        for metric in ["open", "high", "low", "close"]:  # 4 metrics
+            for lag in range(1, 11):  # 10 lags
+                feature_dict[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
 
-        # New features for price prediction (OHLCV lags)
-        for metric in ["open", "high", "low", "close", "volume"]:
-            for lag in range(1, 11):
-                price_df[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
-
+    price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
     price_df["hour_of_day"] = price_df.index.hour
-    # Original target (BTC volatility)
-    # price_df["target_BTCUSDT"] = price_df["volatility_6h_BTCUSDT"]
-    # New target (ETH price 6 hours ahead, assuming 1-minute data)
-    price_df["target_ETHUSDT"] = price_df["close_ETHUSDT"].shift(-360)  # Predict 6 hours ahead
+    price_df["target_ETHUSDT"] = price_df["close_ETHUSDT"].shift(-360)  # 6 hours ahead
 
     price_df = price_df.dropna()
     print(f"Total rows in price_df after preprocessing: {len(price_df)}")
@@ -161,7 +151,7 @@ def load_frame(file_path, timeframe):
     features = [
         f"{metric}_{pair}_lag{lag}" 
         for pair in ["ETHUSDT", "BTCUSDT"]
-        for metric in ["open", "high", "low", "close", "volume"]
+        for metric in ["open", "high", "low", "close"]
         for lag in range(1, 11)
     ] + ["hour_of_day"]  # 80 input features
     
@@ -170,7 +160,7 @@ def load_frame(file_path, timeframe):
         raise ValueError(f"Missing features in data: {missing_features}")
     
     X = df[features]
-    y = df["target_ETHUSDT"]  # Updated target
+    y = df["target_ETHUSDT"]
     
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -194,20 +184,13 @@ def preprocess_live_data(df_btc, df_eth):
     df = pd.concat([df_btc, df_eth], axis=1)
     print(f"Live data sample (raw):\n{df.tail()}")
     
+    feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
-        # Original volatility features (commented out)
-        # df[f"log_return_{pair}"] = np.log(df[f"close_{pair}"].shift(-1) / df[f"close_{pair}"])
-        # df[f"volatility_6h_{pair}"] = df[f"log_return_{pair}"].rolling(window=360).std() * np.sqrt(360)
-        # for metric in ["close", "volume", "log_return"]:
-        #     for lag in range(1, 11):
-        #         df[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
-        # df[f"volatility_6h_{pair}_lag1"] = df[f"volatility_6h_{pair}"].shift(1)
-
-        # New features for price prediction
-        for metric in ["open", "high", "low", "close", "volume"]:
+        for metric in ["open", "high", "low", "close"]:
             for lag in range(1, 11):
-                df[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
+                feature_dict[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
 
+    df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
     df["hour_of_day"] = df.index.hour
     
     df = df.dropna()
@@ -216,7 +199,7 @@ def preprocess_live_data(df_btc, df_eth):
     features = [
         f"{metric}_{pair}_lag{lag}" 
         for pair in ["ETHUSDT", "BTCUSDT"]
-        for metric in ["open", "high", "low", "close", "volume"]
+        for metric in ["open", "high", "low", "close"]
         for lag in range(1, 11)
     ] + ["hour_of_day"]  # 80 input features
     
@@ -239,7 +222,7 @@ def train_model(timeframe, file_path=training_price_data_path):
     if MODEL == "KNN":
         print("\n🚀 Training kNN Model with Grid Search...")
         param_grid = {
-            "n_neighbors": [25, 50, 100, 200],
+            "n_neighbors": [5, 10, 25, 50],  # Reduced range to avoid overfitting
             "weights": ["uniform", "distance"],
             "metric": ["minkowski", "manhattan"]
         }
@@ -328,6 +311,6 @@ def get_inference(token, timeframe, region, data_provider):
     
     X_new = preprocess_live_data(df_btc, df_eth)
     print("Inference input data shape:", X_new.shape)
-    price_pred = loaded_model.predict(X_new)[0]
+    price_pred = loaded_model.predict(X_new)[-1]  # Use the latest prediction
     print(f"Predicted 6h ETH/USD Price: {price_pred:.2f}")
     return price_pred
