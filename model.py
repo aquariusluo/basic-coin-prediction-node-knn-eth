@@ -128,9 +128,9 @@ def format_data(files_btc, files_eth, data_provider):
     feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
         for metric in ["open", "high", "low", "close"]:
-            for lag in range(1, 11):
+            for lag in range(1, 10):  # Reduced to 9 lags per metric to fit 80 features
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
-        # Add moving average as a trend feature
+        # Add a trend feature
         feature_dict[f"close_{pair}_ma5"] = price_df[f"close_{pair}"].rolling(window=5).mean()
 
     price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
@@ -155,15 +155,25 @@ def load_frame(file_path, timeframe):
             f"{metric}_{pair}_lag{lag}" 
             for pair in ["ETHUSDT", "BTCUSDT"]
             for metric in ["open", "high", "low", "close"]
-            for lag in range(1, 11)
+            for lag in range(1, 10)  # 9 lags
         ] + [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + ["hour_of_day"]
-    )  # 80 input features + 2 MAs + 1 hour = 83 (adjust if needed)
+    )  # 72 (2*4*9) + 2 + 1 = 75, adjust to 80 by adding volume or more lags if needed
+    
+    # Ensure exactly 80 features by adding close_lag10
+    features = (
+        [
+            f"{metric}_{pair}_lag{lag}" 
+            for pair in ["ETHUSDT", "BTCUSDT"]
+            for metric in ["open", "high", "low", "close"]
+            for lag in range(1, 10)
+        ] + ["close_ETHUSDT_lag10", "close_BTCUSDT_lag10", "close_ETHUSDT_ma5", "close_BTCUSDT_ma5", "hour_of_day"]
+    )  # 80 features
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
         raise ValueError(f"Missing features in data: {missing_features}")
     
-    X = df[features[:80]]  # Limit to 80 features
+    X = df[features]
     y = df["target_ETHUSDT"]
     
     scaler = StandardScaler()
@@ -191,9 +201,10 @@ def preprocess_live_data(df_btc, df_eth):
     feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
         for metric in ["open", "high", "low", "close"]:
-            for lag in range(1, 11):
+            for lag in range(1, 10):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
         feature_dict[f"close_{pair}_ma5"] = df[f"close_{pair}"].rolling(window=5).mean()
+        feature_dict[f"close_{pair}_lag10"] = df[f"close_{pair}"].shift(10)
 
     df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
     df["hour_of_day"] = df.index.hour
@@ -206,11 +217,11 @@ def preprocess_live_data(df_btc, df_eth):
             f"{metric}_{pair}_lag{lag}" 
             for pair in ["ETHUSDT", "BTCUSDT"]
             for metric in ["open", "high", "low", "close"]
-            for lag in range(1, 11)
-        ] + [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + ["hour_of_day"]
-    )
+            for lag in range(1, 10)
+        ] + ["close_ETHUSDT_lag10", "close_BTCUSDT_lag10", "close_ETHUSDT_ma5", "close_BTCUSDT_ma5", "hour_of_day"]
+    )  # 80 features
     
-    X = df[features[:80]]  # Limit to 80 features
+    X = df[features]
     
     with open(scaler_file_path, "rb") as f:
         scaler = pickle.load(f)
@@ -226,9 +237,24 @@ def train_model(timeframe, file_path=training_price_data_path):
     print(f"Training data shape: {X_train.shape}, Test data shape: {X_test.shape}")
     
     tscv = TimeSeriesSplit(n_splits=5)
-    model = LinearRegression()  # Switch to LinearRegression
-    model.fit(X_train, y_train)
-    print("\n✅ Trained LinearRegression model")
+    print("\n🚀 Training kNN Model with Grid Search...")
+    param_grid = {
+        "n_neighbors": [3, 5, 10, 15],  # Smaller k values to reduce overfitting
+        "weights": ["uniform", "distance"],
+        "metric": ["minkowski", "manhattan"]
+    }
+    model = KNeighborsRegressor()
+    grid_search = GridSearchCV(
+        model,
+        param_grid,
+        cv=tscv,
+        scoring=make_scorer(mean_absolute_error, greater_is_better=False),
+        n_jobs=-1,
+        verbose=2
+    )
+    grid_search.fit(X_train, y_train)
+    model = grid_search.best_estimator_
+    print(f"\n✅ Best k: {model.n_neighbors}, Metric: {model.metric}, Weighting: {model.weights}")
     
     train_pred = model.predict(X_train)
     train_mae = mean_absolute_error(y_train, train_pred)
