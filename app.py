@@ -16,10 +16,19 @@ def update_data():
         os.remove(training_price_data_path)
     
     try:
+        print(f"Downloading BTC data with TRAINING_DAYS={TRAINING_DAYS}, REGION={REGION}, DATA_PROVIDER={DATA_PROVIDER}")
         files_btc = download_data("BTC", TRAINING_DAYS, REGION, DATA_PROVIDER)
+        print(f"Downloading ETH data with TRAINING_DAYS={TRAINING_DAYS}, REGION={REGION}, DATA_PROVIDER={DATA_PROVIDER}")
         files_eth = download_data("ETH", TRAINING_DAYS, REGION, DATA_PROVIDER)
+        
         if not files_btc or not files_eth:
-            raise ValueError("No data files downloaded for BTC or ETH")
+            print("Warning: No new data files downloaded for BTC or ETH")
+            if os.path.exists(training_price_data_path):
+                print(f"Using existing {training_price_data_path} for training")
+                train_model(TIMEFRAME)
+                return
+            else:
+                raise ValueError("No data files downloaded for BTC or ETH, and no existing price_data.csv")
         
         print("Formatting data...")
         format_data(files_btc, files_eth, DATA_PROVIDER)
