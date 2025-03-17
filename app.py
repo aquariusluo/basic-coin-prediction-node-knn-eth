@@ -1,0 +1,37 @@
+import json
+from flask import Flask, Response
+from model import download_data, format_data, train_model, get_inference
+from config import model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER
+
+app = Flask(__name__)
+
+def update_data():
+    print("Starting data update process...")
+    files_btc = download_data("BTC", TRAINING_DAYS, REGION, DATA_PROVIDER)
+    files_eth = download_data("ETH", TRAINING_DAYS, REGION, DATA_PROVIDER)
+    format_data(files_btc, files_eth, DATA_PROVIDER)
+    train_model(TIMEFRAME)
+
+@app.route("/inference/<string:token>")
+def generate_inference(token):
+    if not token or token.upper() != TOKEN:
+        error_msg = "Token is required" if not token else "Token not supported"
+        return Response(json.dumps({"error": error_msg}), status=400, mimetype='application/json')
+    try:
+        inference = get_inference(token.upper(), TIMEFRAME, REGION, DATA_PROVIDER)
+        return Response(str(inference), status=200)
+    except Exception as e:
+        return Response(json.dumps({"error": str(e)}), status=500, mimetype='application/json')
+
+@app.route("/update")
+def update():
+    try:
+        update_data()
+        return "0"
+    except Exception as e:
+        print(f"Update failed: {str(e)}")
+        return "1"
+
+if __name__ == "__main__":
+    update_data()
+    app.run(host="0.0.0.0", port=8000)
