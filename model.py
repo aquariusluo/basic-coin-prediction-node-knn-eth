@@ -124,12 +124,14 @@ def format_data(files_btc, files_eth, data_provider):
     price_df_eth = price_df_eth.rename(columns=lambda x: f"{x}_ETHUSDT")
     price_df = pd.concat([price_df_btc, price_df_eth], axis=1)
 
-    # Feature engineering for price prediction
+    # Feature engineering
     feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
-        for metric in ["open", "high", "low", "close"]:  # 4 metrics
-            for lag in range(1, 11):  # 10 lags
+        for metric in ["open", "high", "low", "close"]:
+            for lag in range(1, 11):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
+        # Add moving average as a trend feature
+        feature_dict[f"close_{pair}_ma5"] = price_df[f"close_{pair}"].rolling(window=5).mean()
 
     price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
     price_df["hour_of_day"] = price_df.index.hour
@@ -148,18 +150,20 @@ def load_frame(file_path, timeframe):
     df.ffill(inplace=True)
     df.bfill(inplace=True)
     
-    features = [
-        f"{metric}_{pair}_lag{lag}" 
-        for pair in ["ETHUSDT", "BTCUSDT"]
-        for metric in ["open", "high", "low", "close"]
-        for lag in range(1, 11)
-    ] + ["hour_of_day"]  # 80 input features
+    features = (
+        [
+            f"{metric}_{pair}_lag{lag}" 
+            for pair in ["ETHUSDT", "BTCUSDT"]
+            for metric in ["open", "high", "low", "close"]
+            for lag in range(1, 11)
+        ] + [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + ["hour_of_day"]
+    )  # 80 input features + 2 MAs + 1 hour = 83 (adjust if needed)
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
         raise ValueError(f"Missing features in data: {missing_features}")
     
-    X = df[features]
+    X = df[features[:80]]  # Limit to 80 features
     y = df["target_ETHUSDT"]
     
     scaler = StandardScaler()
@@ -189,6 +193,7 @@ def preprocess_live_data(df_btc, df_eth):
         for metric in ["open", "high", "low", "close"]:
             for lag in range(1, 11):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
+        feature_dict[f"close_{pair}_ma5"] = df[f"close_{pair}"].rolling(window=5).mean()
 
     df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
     df["hour_of_day"] = df.index.hour
@@ -196,14 +201,16 @@ def preprocess_live_data(df_btc, df_eth):
     df = df.dropna()
     print(f"Live data after preprocessing:\n{df.tail()}")
     
-    features = [
-        f"{metric}_{pair}_lag{lag}" 
-        for pair in ["ETHUSDT", "BTCUSDT"]
-        for metric in ["open", "high", "low", "close"]
-        for lag in range(1, 11)
-    ] + ["hour_of_day"]  # 80 input features
+    features = (
+        [
+            f"{metric}_{pair}_lag{lag}" 
+            for pair in ["ETHUSDT", "BTCUSDT"]
+            for metric in ["open", "high", "low", "close"]
+            for lag in range(1, 11)
+        ] + [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + ["hour_of_day"]
+    )
     
-    X = df[features]
+    X = df[features[:80]]  # Limit to 80 features
     
     with open(scaler_file_path, "rb") as f:
         scaler = pickle.load(f)
@@ -219,58 +226,9 @@ def train_model(timeframe, file_path=training_price_data_path):
     print(f"Training data shape: {X_train.shape}, Test data shape: {X_test.shape}")
     
     tscv = TimeSeriesSplit(n_splits=5)
-    if MODEL == "KNN":
-        print("\n🚀 Training kNN Model with Grid Search...")
-        param_grid = {
-            "n_neighbors": [5, 10, 25, 50],  # Reduced range to avoid overfitting
-            "weights": ["uniform", "distance"],
-            "metric": ["minkowski", "manhattan"]
-        }
-        model = KNeighborsRegressor()
-        grid_search = GridSearchCV(
-            model,
-            param_grid,
-            cv=tscv,
-            scoring=make_scorer(mean_absolute_error, greater_is_better=False),
-            n_jobs=-1,
-            verbose=2
-        )
-        grid_search.fit(X_train, y_train)
-        model = grid_search.best_estimator_
-        print(f"\n✅ Best k: {model.n_neighbors}, Metric: {model.metric}, Weighting: {model.weights}")
-    elif MODEL == "LinearRegression":
-        model = LinearRegression()
-        model.fit(X_train, y_train)
-        print("\n✅ Trained LinearRegression model")
-    elif MODEL == "SVR":
-        print("\n🚀 Training SVR Model with Grid Search...")
-        param_grid = {
-            "C": [0.1, 1, 10],
-            "epsilon": [0.01, 0.1, 1],
-            "kernel": ["rbf", "linear"]
-        }
-        model = SVR()
-        grid_search = GridSearchCV(
-            model,
-            param_grid,
-            cv=tscv,
-            scoring=make_scorer(mean_absolute_error, greater_is_better=False),
-            n_jobs=-1,
-            verbose=2
-        )
-        grid_search.fit(X_train, y_train)
-        model = grid_search.best_estimator_
-        print(f"\n✅ Best C: {model.C}, Epsilon: {model.epsilon}, Kernel: {model.kernel}")
-    elif MODEL == "KernelRidge":
-        model = KernelRidge()
-        model.fit(X_train, y_train)
-        print("\n✅ Trained KernelRidge model")
-    elif MODEL == "BayesianRidge":
-        model = BayesianRidge()
-        model.fit(X_train, y_train)
-        print("\n✅ Trained BayesianRidge model")
-    else:
-        raise ValueError(f"Unsupported model: {MODEL}")
+    model = LinearRegression()  # Switch to LinearRegression
+    model.fit(X_train, y_train)
+    print("\n✅ Trained LinearRegression model")
     
     train_pred = model.predict(X_train)
     train_mae = mean_absolute_error(y_train, train_pred)
@@ -311,6 +269,6 @@ def get_inference(token, timeframe, region, data_provider):
     
     X_new = preprocess_live_data(df_btc, df_eth)
     print("Inference input data shape:", X_new.shape)
-    price_pred = loaded_model.predict(X_new)[-1]  # Use the latest prediction
+    price_pred = loaded_model.predict(X_new)[-1]  # Latest prediction
     print(f"Predicted 6h ETH/USD Price: {price_pred:.2f}")
     return price_pred
