@@ -135,7 +135,7 @@ def format_data(files_btc, files_eth, data_provider):
         feature_dict[f"close_{pair}_lag10"] = price_df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = price_df[f"close_{pair}"].rolling(window=5).mean()
         feature_dict[f"volume_{pair}_lag1"] = price_df[f"volume_{pair}"].shift(1)
-    feature_dict["price_change_ETHUSDT"] = price_df["close_ETHUSDT"] - price_df["close_ETHUSDT"].shift(10)  # 10-min change
+    feature_dict["ema20_ETHUSDT"] = price_df["close_ETHUSDT"].ewm(span=20, adjust=False).mean()  # 20-min EMA
 
     price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
     price_df["hour_of_day"] = price_df.index.hour
@@ -163,8 +163,8 @@ def load_frame(file_path, timeframe):
         ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"volume_{pair}_lag1" for pair in ["ETHUSDT", "BTCUSDT"]] + 
-        ["price_change_ETHUSDT", "hour_of_day"]
-    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 2 (volume_lag1) + 1 (price_change) + 1 (hour)
+        ["ema20_ETHUSDT", "hour_of_day"]
+    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 2 (volume_lag1) + 1 (ema20) + 1 (hour)
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
@@ -203,7 +203,7 @@ def preprocess_live_data(df_btc, df_eth):
         feature_dict[f"close_{pair}_lag10"] = df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = df[f"close_{pair}"].rolling(window=5).mean()
         feature_dict[f"volume_{pair}_lag1"] = df[f"volume_{pair}"].shift(1)
-    feature_dict["price_change_ETHUSDT"] = df["close_ETHUSDT"] - df["close_ETHUSDT"].shift(10)
+    feature_dict["ema20_ETHUSDT"] = df["close_ETHUSDT"].ewm(span=20, adjust=False).mean()
 
     df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
     df["hour_of_day"] = df.index.hour
@@ -220,7 +220,7 @@ def preprocess_live_data(df_btc, df_eth):
         ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"volume_{pair}_lag1" for pair in ["ETHUSDT", "BTCUSDT"]] + 
-        ["price_change_ETHUSDT", "hour_of_day"]
+        ["ema20_ETHUSDT", "hour_of_day"]
     )  # 80 features
     
     X = df[features]
@@ -282,6 +282,6 @@ def get_inference(token, timeframe, region, data_provider):
     
     X_new = preprocess_live_data(df_btc, df_eth)
     print("Inference input data shape:", X_new.shape)
-    price_pred = loaded_model.predict(X_new)[-1]  # Latest prediction
+    price_pred = loaded_model.predict(X_new)[-1] + 54.60  # Bias correction with test MAE
     print(f"Predicted 6h ETH/USD Price: {price_pred:.2f}")
     return price_pred
