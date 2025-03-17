@@ -126,7 +126,7 @@ def format_data(files_btc, files_eth, data_provider):
     price_df_eth = price_df_eth.rename(columns=lambda x: f"{x}_ETHUSDT")
     price_df = pd.concat([price_df_btc, price_df_eth], axis=1)
 
-    # Feature engineering (80 features)
+    # Feature engineering (exactly 80 features)
     feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
         for metric in ["open", "high", "low", "close"]:
@@ -134,8 +134,8 @@ def format_data(files_btc, files_eth, data_provider):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
         feature_dict[f"close_{pair}_lag10"] = price_df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = price_df[f"close_{pair}"].rolling(window=5).mean()
-        # Add volume lags 1-3 to reach 80 features
-        for lag in range(1, 4):
+        # Volume lags 1-2 (4 total instead of 6)
+        for lag in range(1, 3):
             feature_dict[f"volume_{pair}_lag{lag}"] = price_df[f"volume_{pair}"].shift(lag)
 
     price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
@@ -163,9 +163,9 @@ def load_frame(file_path, timeframe):
             for lag in range(1, 10)
         ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
-        [f"volume_{pair}_lag{lag}" for pair in ["ETHUSDT", "BTCUSDT"] for lag in range(1, 4)] + 
+        [f"volume_{pair}_lag{lag}" for pair in ["ETHUSDT", "BTCUSDT"] for lag in range(1, 3)] + 
         ["hour_of_day"]
-    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 6 (volume lags 1-3) + 1 (hour)
+    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 4 (volume lags 1-2) + 1 (hour)
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
@@ -203,7 +203,7 @@ def preprocess_live_data(df_btc, df_eth):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
         feature_dict[f"close_{pair}_lag10"] = df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = df[f"close_{pair}"].rolling(window=5).mean()
-        for lag in range(1, 4):
+        for lag in range(1, 3):
             feature_dict[f"volume_{pair}_lag{lag}"] = df[f"volume_{pair}"].shift(lag)
 
     df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
@@ -220,7 +220,7 @@ def preprocess_live_data(df_btc, df_eth):
             for lag in range(1, 10)
         ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
-        [f"volume_{pair}_lag{lag}" for pair in ["ETHUSDT", "BTCUSDT"] for lag in range(1, 4)] + 
+        [f"volume_{pair}_lag{lag}" for pair in ["ETHUSDT", "BTCUSDT"] for lag in range(1, 3)] + 
         ["hour_of_day"]
     )  # 80 features
     
@@ -242,7 +242,7 @@ def train_model(timeframe, file_path=training_price_data_path):
     tscv = TimeSeriesSplit(n_splits=5)
     print("\n🚀 Training kNN Model with Grid Search...")
     param_grid = {
-        "n_neighbors": [5, 10, 20, 30],  # Adjusted range to reduce overfitting
+        "n_neighbors": [10, 20, 30, 50],  # Larger k to reduce overfitting
         "weights": ["uniform", "distance"],
         "metric": ["minkowski", "manhattan"]
     }
