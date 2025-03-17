@@ -29,7 +29,7 @@
     },
     "worker": [
       {
-        "topicId": 46
+        "topicId": 46,
         "inferenceEntrypointName": "apiAdapter",
         "parameters": {
           "InferenceEndpoint": "http://inference:8000/inference/{Token}",
