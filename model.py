@@ -143,7 +143,7 @@ def format_data(files_btc, files_eth, data_provider):
     price_df["target_ETHUSDT"] = price_df["close_ETHUSDT"].shift(-360)  # 6 hours ahead
 
     price_df = price_df.dropna()
-    print(f" sospecha Total rows in price_df after preprocessing: {len(price_df)}")
+    print(f"Total rows in price_df after preprocessing: {len(price_df)}")
     print(f"First few dates in price_df: {price_df.index[:5].tolist()}")
 
     price_df.to_csv(training_price_data_path, date_format='%Y-%m-%d %H:%M:%S')
