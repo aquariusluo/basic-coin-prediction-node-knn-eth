@@ -1,16 +1,37 @@
 import json
+import os
 from flask import Flask, Response
 from model import download_data, format_data, train_model, get_inference
-from config import model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER
+from config import model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER, data_base_path
 
 app = Flask(__name__)
 
 def update_data():
     print("Starting data update process...")
-    files_btc = download_data("BTC", TRAINING_DAYS, REGION, DATA_PROVIDER)
-    files_eth = download_data("ETH", TRAINING_DAYS, REGION, DATA_PROVIDER)
-    format_data(files_btc, files_eth, DATA_PROVIDER)  # Regenerate price_data.csv
-    train_model(TIMEFRAME)
+    training_price_data_path = os.path.join(data_base_path, "price_data.csv")
+    
+    # Force deletion of old price_data.csv to ensure fresh data
+    if os.path.exists(training_price_data_path):
+        print(f"Deleting existing {training_price_data_path}")
+        os.remove(training_price_data_path)
+    
+    try:
+        files_btc = download_data("BTC", TRAINING_DAYS, REGION, DATA_PROVIDER)
+        files_eth = download_data("ETH", TRAINING_DAYS, REGION, DATA_PROVIDER)
+        if not files_btc or not files_eth:
+            raise ValueError("No data files downloaded for BTC or ETH")
+        
+        print("Formatting data...")
+        format_data(files_btc, files_eth, DATA_PROVIDER)
+        
+        if not os.path.exists(training_price_data_path):
+            raise FileNotFoundError(f"{training_price_data_path} was not created by format_data")
+        
+        print("Training model...")
+        train_model(TIMEFRAME)
+    except Exception as e:
+        print(f"Error in update_data: {str(e)}")
+        raise
 
 @app.route("/inference/<string:token>")
 def generate_inference(token):
