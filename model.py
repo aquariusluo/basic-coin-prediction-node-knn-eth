@@ -12,7 +12,7 @@ from sklearn.linear_model import LinearRegression, BayesianRidge
 from sklearn.svm import SVR
 from sklearn.kernel_ridge import KernelRidge
 from updater import download_binance_daily_data, download_binance_current_day_data, download_coingecko_data, download_coingecko_current_day_data
-from config import data_base_path, model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER, MODEL
+from config import data_base_path, model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER, MODEL, CG_API_KEY
 
 binance_data_path = os.path.join(data_base_path, "binance")
 coingecko_data_path = os.path.join(data_base_path, "coingecko")
@@ -124,17 +124,26 @@ def format_data(files_btc, files_eth, data_provider):
     price_df_eth = price_df_eth.rename(columns=lambda x: f"{x}_ETHUSDT")
     price_df = pd.concat([price_df_btc, price_df_eth], axis=1)
 
-    # Feature engineering for volatility prediction
+    # Feature engineering for price prediction (replacing volatility prediction)
     for pair in ["ETHUSDT", "BTCUSDT"]:
-        price_df[f"log_return_{pair}"] = np.log(price_df[f"close_{pair}"].shift(-1) / price_df[f"close_{pair}"])
-        price_df[f"volatility_6h_{pair}"] = price_df[f"log_return_{pair}"].rolling(window=360).std() * np.sqrt(360)
-        for metric in ["close", "volume", "log_return"]:
+        # Original volatility features (commented out)
+        # price_df[f"log_return_{pair}"] = np.log(price_df[f"close_{pair}"].shift(-1) / price_df[f"close_{pair}"])
+        # price_df[f"volatility_6h_{pair}"] = price_df[f"log_return_{pair}"].rolling(window=360).std() * np.sqrt(360)
+        # for metric in ["close", "volume", "log_return"]:
+        #     for lag in range(1, 11):
+        #         price_df[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
+        # price_df[f"volatility_6h_{pair}_lag1"] = price_df[f"volatility_6h_{pair}"].shift(1)
+
+        # New features for price prediction (OHLCV lags)
+        for metric in ["open", "high", "low", "close", "volume"]:
             for lag in range(1, 11):
                 price_df[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
-        price_df[f"volatility_6h_{pair}_lag1"] = price_df[f"volatility_6h_{pair}"].shift(1)
 
     price_df["hour_of_day"] = price_df.index.hour
-    price_df["target_BTCUSDT"] = price_df["volatility_6h_BTCUSDT"]
+    # Original target (BTC volatility)
+    # price_df["target_BTCUSDT"] = price_df["volatility_6h_BTCUSDT"]
+    # New target (ETH price 6 hours ahead, assuming 1-minute data)
+    price_df["target_ETHUSDT"] = price_df["close_ETHUSDT"].shift(-360)  # Predict 6 hours ahead
 
     price_df = price_df.dropna()
     print(f"Total rows in price_df after preprocessing: {len(price_df)}")
@@ -152,23 +161,23 @@ def load_frame(file_path, timeframe):
     features = [
         f"{metric}_{pair}_lag{lag}" 
         for pair in ["ETHUSDT", "BTCUSDT"]
-        for metric in ["close", "volume", "log_return"]
+        for metric in ["open", "high", "low", "close", "volume"]
         for lag in range(1, 11)
-    ] + [f"volatility_6h_{pair}_lag1" for pair in ["ETHUSDT", "BTCUSDT"]] + ["hour_of_day"]
+    ] + ["hour_of_day"]  # 80 input features
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
         raise ValueError(f"Missing features in data: {missing_features}")
     
     X = df[features]
-    y = df["target_BTCUSDT"]
+    y = df["target_ETHUSDT"]  # Updated target
     
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
     split_idx = int(len(X) * 0.8)
     X_train, X_test = X_scaled[:split_idx], X_scaled[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]  # Fixed syntax error
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
     print(f"Loaded {len(df)} rows, resampled to {timeframe}")
     return X_train, X_test, y_train, y_test, scaler
@@ -186,12 +195,18 @@ def preprocess_live_data(df_btc, df_eth):
     print(f"Live data sample (raw):\n{df.tail()}")
     
     for pair in ["ETHUSDT", "BTCUSDT"]:
-        df[f"log_return_{pair}"] = np.log(df[f"close_{pair}"].shift(-1) / df[f"close_{pair}"])
-        df[f"volatility_6h_{pair}"] = df[f"log_return_{pair}"].rolling(window=360).std() * np.sqrt(360)
-        for metric in ["close", "volume", "log_return"]:
+        # Original volatility features (commented out)
+        # df[f"log_return_{pair}"] = np.log(df[f"close_{pair}"].shift(-1) / df[f"close_{pair}"])
+        # df[f"volatility_6h_{pair}"] = df[f"log_return_{pair}"].rolling(window=360).std() * np.sqrt(360)
+        # for metric in ["close", "volume", "log_return"]:
+        #     for lag in range(1, 11):
+        #         df[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
+        # df[f"volatility_6h_{pair}_lag1"] = df[f"volatility_6h_{pair}"].shift(1)
+
+        # New features for price prediction
+        for metric in ["open", "high", "low", "close", "volume"]:
             for lag in range(1, 11):
                 df[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
-        df[f"volatility_6h_{pair}_lag1"] = df[f"volatility_6h_{pair}"].shift(1)
 
     df["hour_of_day"] = df.index.hour
     
@@ -201,9 +216,9 @@ def preprocess_live_data(df_btc, df_eth):
     features = [
         f"{metric}_{pair}_lag{lag}" 
         for pair in ["ETHUSDT", "BTCUSDT"]
-        for metric in ["close", "volume", "log_return"]
+        for metric in ["open", "high", "low", "close", "volume"]
         for lag in range(1, 11)
-    ] + [f"volatility_6h_{pair}_lag1" for pair in ["ETHUSDT", "BTCUSDT"]] + ["hour_of_day"]
+    ] + ["hour_of_day"]  # 80 input features
     
     X = df[features]
     
@@ -224,7 +239,7 @@ def train_model(timeframe, file_path=training_price_data_path):
     if MODEL == "KNN":
         print("\n🚀 Training kNN Model with Grid Search...")
         param_grid = {
-            "n_neighbors": [25, 50, 100, 200],  # Adjusted range
+            "n_neighbors": [25, 50, 100, 200],
             "weights": ["uniform", "distance"],
             "metric": ["minkowski", "manhattan"]
         }
@@ -313,6 +328,6 @@ def get_inference(token, timeframe, region, data_provider):
     
     X_new = preprocess_live_data(df_btc, df_eth)
     print("Inference input data shape:", X_new.shape)
-    volatility_pred = loaded_model.predict(X_new)[0]
-    print(f"Predicted 6h BTC/USD Volatility: {volatility_pred:.6f}")
-    return volatility_pred
+    price_pred = loaded_model.predict(X_new)[0]
+    print(f"Predicted 6h ETH/USD Price: {price_pred:.2f}")
+    return price_pred
