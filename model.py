@@ -5,9 +5,9 @@ from zipfile import ZipFile
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, make_scorer
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from updater import download_binance_daily_data, download_binance_current_day_data, download_coingecko_data, download_coingecko_current_day_data
 from config import data_base_path, model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER, MODEL, CG_API_KEY
 
@@ -135,7 +135,8 @@ def format_data(files_btc, files_eth, data_provider):
         feature_dict[f"close_{pair}_lag10"] = price_df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = price_df[f"close_{pair}"].rolling(window=5).mean()
         feature_dict[f"volume_{pair}_lag1"] = price_df[f"volume_{pair}"].shift(1)
-    feature_dict["price_change_ETHUSDT"] = price_df["close_ETHUSDT"] - price_df["close_ETHUSDT"].shift(5)  # Only ETH trend
+    feature_dict["price_change_ETHUSDT"] = price_df["close_ETHUSDT"] - price_df["close_ETHUSDT"].shift(10)  # 10-min change
+    feature_dict["volatility_ETHUSDT"] = price_df["close_ETHUSDT"].rolling(window=10).std()  # 10-min volatility
 
     price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
     price_df["hour_of_day"] = price_df.index.hour
@@ -163,8 +164,8 @@ def load_frame(file_path, timeframe):
         ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"volume_{pair}_lag1" for pair in ["ETHUSDT", "BTCUSDT"]] + 
-        ["price_change_ETHUSDT", "hour_of_day"]
-    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 2 (volume_lag1) + 1 (price_change_ETH) + 1 (hour)
+        ["price_change_ETHUSDT", "volatility_ETHUSDT", "hour_of_day"]
+    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 2 (volume_lag1) + 1 (price_change) + 1 (volatility) + 1 (hour)
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
@@ -203,7 +204,8 @@ def preprocess_live_data(df_btc, df_eth):
         feature_dict[f"close_{pair}_lag10"] = df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = df[f"close_{pair}"].rolling(window=5).mean()
         feature_dict[f"volume_{pair}_lag1"] = df[f"volume_{pair}"].shift(1)
-    feature_dict["price_change_ETHUSDT"] = df["close_ETHUSDT"] - df["close_ETHUSDT"].shift(5)
+    feature_dict["price_change_ETHUSDT"] = df["close_ETHUSDT"] - df["close_ETHUSDT"].shift(10)
+    feature_dict["volatility_ETHUSDT"] = df["close_ETHUSDT"].rolling(window=10).std()
 
     df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
     df["hour_of_day"] = df.index.hour
@@ -220,7 +222,7 @@ def preprocess_live_data(df_btc, df_eth):
         ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
         [f"volume_{pair}_lag1" for pair in ["ETHUSDT", "BTCUSDT"]] + 
-        ["price_change_ETHUSDT", "hour_of_day"]
+        ["price_change_ETHUSDT", "volatility_ETHUSDT", "hour_of_day"]
     )  # 80 features
     
     X = df[features]
@@ -238,25 +240,10 @@ def train_model(timeframe, file_path=training_price_data_path):
     X_train, X_test, y_train, y_test, scaler = load_frame(file_path, timeframe)
     print(f"Training data shape: {X_train.shape}, Test data shape: {X_test.shape}")
     
-    tscv = TimeSeriesSplit(n_splits=5)
-    print("\n🚀 Training kNN Model with Grid Search...")
-    param_grid = {
-        "n_neighbors": [50, 75, 100, 150],  # Larger k range
-        "weights": ["distance"],  # Focus on distance weighting
-        "metric": ["minkowski", "manhattan"]
-    }
-    model = KNeighborsRegressor()
-    grid_search = GridSearchCV(
-        model,
-        param_grid,
-        cv=tscv,
-        scoring=make_scorer(mean_absolute_error, greater_is_better=False),
-        n_jobs=-1,
-        verbose=2
-    )
-    grid_search.fit(X_train, y_train)
-    model = grid_search.best_estimator_
-    print(f"\n✅ Best k: {model.n_neighbors}, Metric: {model.metric}, Weighting: {model.weights}")
+    print("\n🚀 Training LinearRegression Model...")
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    print("\n✅ Trained LinearRegression model")
     
     train_pred = model.predict(X_train)
     train_mae = mean_absolute_error(y_train, train_pred)
