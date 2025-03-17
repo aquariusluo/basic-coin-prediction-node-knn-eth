@@ -9,7 +9,7 @@ def update_data():
     print("Starting data update process...")
     files_btc = download_data("BTC", TRAINING_DAYS, REGION, DATA_PROVIDER)
     files_eth = download_data("ETH", TRAINING_DAYS, REGION, DATA_PROVIDER)
-    format_data(files_btc, files_eth, DATA_PROVIDER)
+    format_data(files_btc, files_eth, DATA_PROVIDER)  # Regenerate price_data.csv
     train_model(TIMEFRAME)
 
 @app.route("/inference/<string:token>")
@@ -33,5 +33,5 @@ def update():
         return "1"
 
 if __name__ == "__main__":
-    update_data()
+    update_data()  # Regenerate data and train model on startup
     app.run(host="0.0.0.0", port=8000)
