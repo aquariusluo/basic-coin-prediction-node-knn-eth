@@ -8,9 +8,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, make_scorer
-from sklearn.linear_model import LinearRegression, BayesianRidge
-from sklearn.svm import SVR
-from sklearn.kernel_ridge import KernelRidge
 from updater import download_binance_daily_data, download_binance_current_day_data, download_coingecko_data, download_coingecko_current_day_data
 from config import data_base_path, model_file_path, TOKEN, TIMEFRAME, TRAINING_DAYS, REGION, DATA_PROVIDER, MODEL, CG_API_KEY
 
@@ -129,7 +126,7 @@ def format_data(files_btc, files_eth, data_provider):
     price_df_eth = price_df_eth.rename(columns=lambda x: f"{x}_ETHUSDT")
     price_df = pd.concat([price_df_btc, price_df_eth], axis=1)
 
-    # Feature engineering
+    # Feature engineering (80 features)
     feature_dict = {}
     for pair in ["ETHUSDT", "BTCUSDT"]:
         for metric in ["open", "high", "low", "close"]:
@@ -137,6 +134,9 @@ def format_data(files_btc, files_eth, data_provider):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = price_df[f"{metric}_{pair}"].shift(lag)
         feature_dict[f"close_{pair}_lag10"] = price_df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = price_df[f"close_{pair}"].rolling(window=5).mean()
+        # Add volume lags 1-3 to reach 80 features
+        for lag in range(1, 4):
+            feature_dict[f"volume_{pair}_lag{lag}"] = price_df[f"volume_{pair}"].shift(lag)
 
     price_df = pd.concat([price_df, pd.DataFrame(feature_dict)], axis=1)
     price_df["hour_of_day"] = price_df.index.hour
@@ -161,8 +161,11 @@ def load_frame(file_path, timeframe):
             for pair in ["ETHUSDT", "BTCUSDT"]
             for metric in ["open", "high", "low", "close"]
             for lag in range(1, 10)
-        ] + ["close_ETHUSDT_lag10", "close_BTCUSDT_lag10", "close_ETHUSDT_ma5", "close_BTCUSDT_ma5", "hour_of_day"]
-    )  # 80 features
+        ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
+        [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
+        [f"volume_{pair}_lag{lag}" for pair in ["ETHUSDT", "BTCUSDT"] for lag in range(1, 4)] + 
+        ["hour_of_day"]
+    )  # 80 features: 72 (OHLC lags 1-9) + 2 (close_lag10) + 2 (ma5) + 6 (volume lags 1-3) + 1 (hour)
     
     missing_features = [f for f in features if f not in df.columns]
     if missing_features:
@@ -200,6 +203,8 @@ def preprocess_live_data(df_btc, df_eth):
                 feature_dict[f"{metric}_{pair}_lag{lag}"] = df[f"{metric}_{pair}"].shift(lag)
         feature_dict[f"close_{pair}_lag10"] = df[f"close_{pair}"].shift(10)
         feature_dict[f"close_{pair}_ma5"] = df[f"close_{pair}"].rolling(window=5).mean()
+        for lag in range(1, 4):
+            feature_dict[f"volume_{pair}_lag{lag}"] = df[f"volume_{pair}"].shift(lag)
 
     df = pd.concat([df, pd.DataFrame(feature_dict)], axis=1)
     df["hour_of_day"] = df.index.hour
@@ -213,7 +218,10 @@ def preprocess_live_data(df_btc, df_eth):
             for pair in ["ETHUSDT", "BTCUSDT"]
             for metric in ["open", "high", "low", "close"]
             for lag in range(1, 10)
-        ] + ["close_ETHUSDT_lag10", "close_BTCUSDT_lag10", "close_ETHUSDT_ma5", "close_BTCUSDT_ma5", "hour_of_day"]
+        ] + [f"close_{pair}_lag10" for pair in ["ETHUSDT", "BTCUSDT"]] + 
+        [f"close_{pair}_ma5" for pair in ["ETHUSDT", "BTCUSDT"]] + 
+        [f"volume_{pair}_lag{lag}" for pair in ["ETHUSDT", "BTCUSDT"] for lag in range(1, 4)] + 
+        ["hour_of_day"]
     )  # 80 features
     
     X = df[features]
@@ -234,7 +242,7 @@ def train_model(timeframe, file_path=training_price_data_path):
     tscv = TimeSeriesSplit(n_splits=5)
     print("\n🚀 Training kNN Model with Grid Search...")
     param_grid = {
-        "n_neighbors": [3, 5, 10, 15],
+        "n_neighbors": [5, 10, 20, 30],  # Adjusted range to reduce overfitting
         "weights": ["uniform", "distance"],
         "metric": ["minkowski", "manhattan"]
     }
